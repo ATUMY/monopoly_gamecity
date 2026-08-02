@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Monopoly Dark Premium</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background-color: #050505; color: #FFFFFF; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
@@ -18,7 +17,7 @@
     .auth-box { width: 100%; max-width: 320px; padding: 24px; text-align: center; }
     .auth-box h1 { font-size: 28px; letter-spacing: 2px; margin-bottom: 20px; }
     .auth-box input { width: 100%; padding: 12px; background: #000; border: 1px solid #FFF; color: #FFF; border-radius: 8px; margin-bottom: 12px; text-align: center; font-size: 16px; outline: none; }
-    #auth-error { color: #FF4D4D; font-size: 12px; margin-bottom: 12px; min-height: 16px; word-break: break-word; }
+    #auth-error { color: #FF4D4D; font-size: 12px; margin-bottom: 12px; min-height: 16px; }
 
     header { padding: 10px; text-align: center; flex-shrink: 0; }
     header h1 { font-size: 20px; letter-spacing: 3px; margin-bottom: 6px; }
@@ -100,19 +99,6 @@
   </nav>
 
   <script>
-    // --- ПОДСТАВЬ СВОИ ДАННЫЕ ИЗ SUPABASE NИЖЕ ---
-    const SUPABASE_URL = 'https://trrztqjppesmblaocaob.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRycnp0cWpwcGVzbWJsYW9jYW9iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2NTM1NDUsImV4cCI6MjEwMTIyOTU0NX0.RRV9SqutlYbKI5DYHdMZNUiJ37IFZl6J8QzxaHt2Y_A';
-    
-    let supabase = null;
-    try {
-      if (SUPABASE_URL !== 'YOUR_SUPABASE_URL') {
-        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-      }
-    } catch(e) {
-      console.error("Supabase init error:", e);
-    }
-
     const SECTORS = [
       { name: "СТАРТ", type: "start", color: "#FFFFFF" },
       { name: "Детройт", type: "city", price: 60, rent: [2, 10, 30, 90, 160, 250], housePrice: 50, color: "#8B4513" },
@@ -160,7 +146,7 @@
       { name: "Шанс", type: "chance", color: "#888888" }
     ];
 
-    let player = { id: null, nickname: "Игрок", balance: 1500, position: 0 };
+    let player = { nickname: "Игрок", balance: 1500, position: 0 };
     let assets = [];
     let currentRotation = 0;
 
@@ -168,6 +154,9 @@
     if (tg) {
       tg.ready();
       tg.expand();
+      if (tg.initDataUnsafe?.user?.first_name) {
+        document.getElementById('nickname-input').value = tg.initDataUnsafe.user.first_name;
+      }
     }
 
     const canvas = document.getElementById('wheel');
@@ -216,58 +205,35 @@
     }
     drawWheel();
 
-    async function login() {
+    function login() {
       const nickInput = document.getElementById('nickname-input');
       const errBox = document.getElementById('auth-error');
-      const loginBtn = document.getElementById('login-btn');
-      
       const nick = nickInput.value.trim();
+
       if (!nick) {
         errBox.innerText = "Введите никнейм!";
         return;
       }
 
-      errBox.innerText = "";
-      loginBtn.innerText = "Загрузка...";
-      loginBtn.disabled = true;
-
-      const tgUser = tg?.initDataUnsafe?.user;
-      const tgId = tgUser ? tgUser.id : Math.floor(Math.random() * 10000000);
-
       player.nickname = nick;
-
-      if (supabase) {
+      
+      const saved = localStorage.getItem('tg_monopoly_player');
+      if (saved) {
         try {
-          let { data, error } = await supabase.from('game_sessions').select('*').eq('telegram_id', tgId).maybeSingle();
-
-          if (!data) {
-            const res = await supabase.from('game_sessions').insert([{
-              telegram_id: tgId, nickname: nick, balance: 1500, position: 0
-            }]).select();
-            if (res.data && res.data.length > 0) {
-              data = res.data[0];
-            }
-          }
-
-          if (data) {
-            player = data;
-          }
-        } catch (e) {
-          console.warn("Ошибка базы данных, вход в локальном режиме:", e);
-        }
+          const parsed = JSON.parse(saved);
+          player.balance = parsed.balance ?? 1500;
+          player.position = parsed.position ?? 0;
+          assets = JSON.parse(localStorage.getItem('tg_monopoly_assets') || "[]");
+        } catch(e){}
       }
 
       document.getElementById('auth-screen').style.display = 'none';
       updateUI();
-      loadAssets();
     }
 
-    async function loadAssets() {
-      if (!player.id || !supabase) return;
-      try {
-        const { data } = await supabase.from('player_assets').select('*').eq('player_id', player.id);
-        assets = data || [];
-      } catch(e){}
+    function saveState() {
+      localStorage.setItem('tg_monopoly_player', JSON.stringify(player));
+      localStorage.setItem('tg_monopoly_assets', JSON.stringify(assets));
     }
 
     function updateUI() {
@@ -275,7 +241,7 @@
       document.getElementById('player-balance').innerText = player.balance + '€';
     }
 
-    async function rollDice() {
+    function rollDice() {
       const btn = document.getElementById('dice-btn');
       btn.disabled = true;
 
@@ -293,10 +259,7 @@
       currentRotation += 1080 + (targetDegree - (currentRotation % 360));
       
       document.getElementById('wheel').style.transform = `rotate(${currentRotation}deg)`;
-
-      if (player.id && supabase) {
-        supabase.from('game_sessions').update({ balance: player.balance, position: newPos }).eq('id', player.id);
-      }
+      saveState();
 
       setTimeout(() => {
         btn.disabled = false;
@@ -323,7 +286,7 @@
             <button class="btn" onclick="closeModal()">Отказаться</button>
           `;
         } else {
-          desc.innerText = `Владелец актива: вы. Уровень дома: ${owned.houses}`;
+          desc.innerText = `Владелец актива: вы.`;
           btns.innerHTML = `<button class="btn" onclick="closeModal()">Закрыть</button>`;
         }
       } else if (sector.type === 'tax') {
@@ -337,29 +300,21 @@
       modal.classList.add('active');
     }
 
-    async function buyProperty() {
+    function buyProperty() {
       const sector = SECTORS[player.position];
       if (player.balance < sector.price) return alert("Недостаточно средств!");
 
       player.balance -= sector.price;
-      
-      const newAsset = { player_id: player.id, sector_index: player.position, houses: 0 };
-      assets.push(newAsset);
+      assets.push({ sector_index: player.position, houses: 0 });
 
-      if (player.id && supabase) {
-        await supabase.from('game_sessions').update({ balance: player.balance }).eq('id', player.id);
-        await supabase.from('player_assets').insert([newAsset]);
-      }
-
+      saveState();
       updateUI();
       closeModal();
     }
 
-    async function payTax(amount) {
+    function payTax(amount) {
       player.balance -= amount;
-      if (player.id && supabase) {
-        await supabase.from('game_sessions').update({ balance: player.balance }).eq('id', player.id);
-      }
+      saveState();
       updateUI();
       closeModal();
     }
@@ -385,7 +340,7 @@
         html += `
           <div class="asset-item card-border">
             <div>
-              <b>${sec.name}</b><br><small>Домов: ${a.houses || 0}</small>
+              <b>${sec.name}</b>
             </div>
           </div>
         `;
@@ -404,11 +359,9 @@
       openFullModal('🏦 Банк', html);
     }
 
-    async function takeLoan() {
+    function takeLoan() {
       player.balance += 1000;
-      if (player.id && supabase) {
-        await supabase.from('game_sessions').update({ balance: player.balance }).eq('id', player.id);
-      }
+      saveState();
       updateUI();
       closeFullModal();
       alert("Вам выдан кредит 1000€!");
@@ -428,6 +381,7 @@
 
     function resetGame() {
       if (confirm("Вы уверены, что хотите сбросить игру?")) {
+        localStorage.clear();
         location.reload();
       }
     }
