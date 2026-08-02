@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Monopoly Dark Premium</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #050505; color: #FFFFFF; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+    
+    /* Dark Premium UI Styles */
+    .card-border { background: #0A0A0A; border: 1.5px solid #FFFFFF; border-radius: 12px; box-shadow: 0 4px 20px rgba(255,255,255,0.05); }
+    .btn { background: #000000; color: #FFFFFF; border: 1.5px solid #FFFFFF; border-radius: 8px; padding: 10px 16px; font-weight: bold; cursor: pointer; transition: all 0.2s; }
+    .btn:active { background: #FFFFFF; color: #000000; }
+    
+    /* Screen 1: Auth */
+    #auth-screen { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .auth-box { width: 100%; max-width: 320px; padding: 24px; text-align: center; }
+    .auth-box h1 { font-size: 28px; letter-spacing: 2px; margin-bottom: 20px; }
+    .auth-box input { width: 100%; padding: 12px; background: #000; border: 1px solid #FFF; color: #FFF; border-radius: 8px; margin-bottom: 16px; text-align: center; font-size: 16px; outline: none; }
+
+    /* Main App Layout */
+    header { padding: 10px; text-align: center; flex-shrink: 0; }
+    header h1 { font-size: 20px; letter-spacing: 3px; margin-bottom: 6px; }
+    .info-bar { display: flex; justify-content: space-around; padding: 8px; font-size: 13px; max-width: 400px; margin: 0 auto; }
+
+    /* Roulette Wheel Canvas Zone */
+    .roulette-container { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .pointer { position: absolute; top: 10px; z-index: 10; width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-top: 18px solid #FFF; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.8)); }
+    #wheel { transition: transform 4s cubic-bezier(0.15, 0.90, 0.2, 1.00); }
+    .center-dice-btn { position: absolute; width: 70px; height: 70px; border-radius: 50%; background: #000; border: 2px solid #FFF; color: #FFF; font-size: 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 5; box-shadow: 0 0 15px rgba(255,255,255,0.2); }
+
+    /* Modals & Event Cards */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: flex; align-items: flex-end; justify-content: center; padding: 16px; z-index: 500; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+    .modal-overlay.active { opacity: 1; pointer-events: auto; }
+    .event-card { width: 100%; max-width: 400px; padding: 20px; margin-bottom: 70px; text-align: center; }
+    .event-card h3 { font-size: 18px; margin-bottom: 10px; }
+    .event-card p { font-size: 14px; color: #CCC; margin-bottom: 16px; }
+    .btn-group { display: flex; gap: 10px; justify-content: center; }
+
+    /* Navigation Bar */
+    nav { height: 65px; display: flex; gap: 8px; padding: 8px; background: #000; border-top: 1px solid #333; flex-shrink: 0; }
+    nav .btn { flex: 1; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+
+    /* Lists Modal */
+    .full-modal { position: fixed; inset: 0; background: #050505; z-index: 800; display: none; flex-direction: column; padding: 20px; }
+    .full-modal.active { display: flex; }
+    .full-modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+    .list-content { flex: 1; overflow-y: auto; }
+    .asset-item { padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+  </style>
+</head>
+<body>
+
+  <!-- AUTH SCREEN -->
+  <div id="auth-screen">
+    <div class="auth-box card-border">
+      <h1>MONOPOLY</h1>
+      <input type="text" id="nickname-input" placeholder="Введите ваш никнейм..." maxlength="15">
+      <button class="btn" style="width:100%" onclick="login()">Подключиться</button>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <header>
+    <h1>MONOPOLY</h1>
+    <div class="info-bar card-border">
+      <span>Игрок: <b id="player-name">-</b></span>
+      <span>Баланс: <b id="player-balance">1500€</b></span>
+      <span>Статус: <b id="player-status">Ваш ход</b></span>
+    </div>
+  </header>
+
+  <div class="roulette-container">
+    <div class="pointer"></div>
+    <canvas id="wheel" width="340" height="340"></canvas>
+    <button class="center-dice-btn" id="dice-btn" onclick="rollDice()">🎲</button>
+  </div>
+
+  <!-- EVENT MODAL -->
+  <div class="modal-overlay" id="event-modal">
+    <div class="event-card card-border">
+      <h3 id="modal-title">Событие</h3>
+      <p id="modal-desc">Описание события...</p>
+      <div class="btn-group" id="modal-buttons"></div>
+    </div>
+  </div>
+
+  <!-- FULLSCREEN MODAL (Assets, Bank, Settings) -->
+  <div class="full-modal" id="full-modal">
+    <div class="full-modal-header">
+      <h2 id="full-modal-title">Заголовок</h2>
+      <button class="btn" onclick="closeFullModal()">✕</button>
+    </div>
+    <div class="list-content" id="full-modal-body"></div>
+  </div>
+
+  <!-- BOTTOM NAV -->
+  <nav>
+    <button class="btn" onclick="openAssets()">🏢 Активы</button>
+    <button class="btn" onclick="openBank()">🏦 Банк</button>
+    <button class="btn" onclick="openMore()">⚙️ Ещё</button>
+  </nav>
+
+  <script>
+    // --- SUPABASE SETUP ---
+    const SUPABASE_URL = 'https://trrztqjppesmblaocaob.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRycnp0cWpwcGVzbWJsYW9jYW9iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2NTM1NDUsImV4cCI6MjEwMTIyOTU0NX0.RRV9SqutlYbKI5DYHdMZNUiJ37IFZl6J8QzxaHt2Y_A';
+    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // --- GAME DATA CONFIG (44 SECTORS) ---
+    const SECTORS = [
+      { name: "СТАРТ", type: "start", color: "#FFFFFF" },
+      { name: "Детройт", type: "city", price: 60, rent: [2, 10, 30, 90, 160, 250], housePrice: 50, color: "#8B4513" },
+      { name: "Казна", type: "chest", color: "#888888" },
+      { name: "Кливленд", type: "city", price: 60, rent: [4, 20, 60, 180, 320, 450], housePrice: 50, color: "#8B4513" },
+      { name: "Налог", type: "tax", val: 200, color: "#FFFFFF" },
+      { name: "Вокзал Северный", type: "station", price: 200, rent: 25, color: "#FFFFFF" },
+      { name: "Мемфис", type: "city", price: 100, rent: [6, 30, 90, 270, 400, 550], housePrice: 50, color: "#87CEEB" },
+      { name: "Шанс", type: "chance", color: "#888888" },
+      { name: "Нэшвилл", type: "city", price: 100, rent: [6, 30, 90, 270, 400, 550], housePrice: 50, color: "#87CEEB" },
+      { name: "Атланта", type: "city", price: 120, rent: [8, 40, 100, 300, 450, 600], housePrice: 50, color: "#87CEEB" },
+      { name: "Тюрьма", type: "jail", color: "#FFFFFF" },
+      { name: "Феникс", type: "city", price: 140, rent: [10, 50, 150, 450, 625, 750], housePrice: 100, color: "#FF69B4" },
+      { name: "Денвер", type: "city", price: 140, rent: [10, 50, 150, 450, 625, 750], housePrice: 100, color: "#FF69B4" },
+      { name: "Порт Западный", type: "station", price: 200, rent: 25, color: "#FFFFFF" },
+      { name: "Даллас", type: "city", price: 160, rent: [12, 60, 180, 500, 700, 900], housePrice: 100, color: "#FF69B4" },
+      { name: "Хьюстон", type: "city", price: 180, rent: [14, 70, 200, 550, 750, 950], housePrice: 100, color: "#FFA500" },
+      { name: "Казна", type: "chest", color: "#888888" },
+      { name: "Сиэтл", type: "city", price: 180, rent: [14, 70, 200, 550, 750, 950], housePrice: 100, color: "#FFA500" },
+      { name: "Филадельфия", type: "city", price: 200, rent: [16, 80, 220, 600, 800, 1000], housePrice: 100, color: "#FFA500" },
+      { name: "Вокзал Южный", type: "station", price: 200, rent: 25, color: "#FFFFFF" },
+      { name: "Майами", type: "city", price: 220, rent: [18, 90, 250, 700, 875, 1050], housePrice: 150, color: "#FF0000" },
+      { name: "Шанс", type: "chance", color: "#888888" },
+      { name: "Лас-Вегас", type: "city", price: 220, rent: [18, 90, 250, 700, 875, 1050], housePrice: 150, color: "#FF0000" },
+      { name: "Чикаго", type: "city", price: 240, rent: [20, 100, 300, 750, 925, 1100], housePrice: 150, color: "#FF0000" },
+      { name: "Бесплатная парковка", type: "empty", color: "#FFFFFF" },
+      { name: "Сан-Диего", type: "city", price: 260, rent: [22, 110, 330, 800, 975, 1150], housePrice: 150, color: "#FFFF00" },
+      { name: "Сан-Франциско", type: "city", price: 260, rent: [22, 110, 330, 800, 975, 1150], housePrice: 150, color: "#FFFF00" },
+      { name: "Порт Восточный", type: "station", price: 200, rent: 25, color: "#FFFFFF" },
+      { name: "Бостон", type: "city", price: 280, rent: [24, 120, 360, 850, 1025, 1200], housePrice: 150, color: "#FFFF00" },
+      { name: "Казна", type: "chest", color: "#888888" },
+      { name: "Вашингтон", type: "city", price: 300, rent: [26, 130, 390, 900, 1100, 1275], housePrice: 200, color: "#008000" },
+      { name: "Лос-Анджелес", type: "city", price: 300, rent: [26, 130, 390, 900, 1100, 1275], housePrice: 200, color: "#008000" },
+      { name: "В тюрьму", type: "go_to_jail", color: "#FFFFFF" },
+      { name: "Беверли-Хиллз", type: "city", price: 320, rent: [28, 150, 450, 1000, 1200, 1400], housePrice: 200, color: "#008000" },
+      { name: "Шанс", type: "chance", color: "#888888" },
+      { name: "Манхэттен", type: "city", price: 350, rent: [35, 175, 500, 1100, 1300, 1500], housePrice: 200, color: "#0000FF" },
+      { name: "Сверхналог", type: "tax", val: 100, color: "#FFFFFF" },
+      { name: "Нью-Йорк", type: "city", price: 400, rent: [50, 200, 600, 1400, 1700, 2000], housePrice: 200, color: "#0000FF" },
+      { name: "Казна", type: "chest", color: "#888888" },
+      { name: "Шанс", type: "chance", color: "#888888" },
+      { name: "Бонус", type: "bonus", val: 100, color: "#FFFFFF" },
+      { name: "Шанс", type: "chance", color: "#888888" },
+      { name: "Казна", type: "chest", color: "#888888" },
+      { name: "Шанс", type: "chance", color: "#888888" }
+    ];
+
+    // STATE
+    let player = null;
+    let assets = [];
+    let currentRotation = 0;
+
+    const tg = window.Telegram?.WebApp;
+    if (tg) tg.expand();
+
+    // --- ROULETTE CANVAS RENDER ---
+    const canvas = document.getElementById('wheel');
+    const ctx = canvas.getContext('2d');
+    const totalSectors = SECTORS.length;
+    const arc = (2 * Math.PI) / totalSectors;
+
+    function drawWheel() {
+      ctx.clearRect(0, 0, 340, 340);
+      const cx = 170, cy = 170, radius = 160;
+
+      for (let i = 0; i < totalSectors; i++) {
+        const angle = i * arc - Math.PI / 2;
+        
+        // Sector wedge
+        ctx.beginPath();
+        ctx.fillStyle = '#0A0A0A';
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 1;
+        ctx.arc(cx, cy, radius, angle, angle + arc);
+        ctx.lineTo(cx, cy);
+        ctx.fill();
+        ctx.stroke();
+
+        // Color bar on top edge
+        ctx.beginPath();
+        ctx.fillStyle = SECTORS[i].color;
+        ctx.arc(cx, cy, radius, angle, angle + arc);
+        ctx.arc(cx, cy, radius - 12, angle + arc, angle, true);
+        ctx.fill();
+
+        // Text
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angle + arc / 2);
+        ctx.textAlign = "right";
+        ctx.fillStyle = "#FFF";
+        ctx.font = "8px sans-serif";
+        ctx.fillText(SECTORS[i].name.substring(0, 9), radius - 18, 3);
+        ctx.restore();
+      }
+
+      // Inner cut-out
+      ctx.beginPath();
+      ctx.arc(cx, cy, 55, 0, 2 * Math.PI);
+      ctx.fillStyle = '#000000';
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2;
+      ctx.fill();
+      ctx.stroke();
+    }
+    drawWheel();
+
+    // --- AUTH & DATABASE LOGIC ---
+    async function login() {
+      const nick = document.getElementById('nickname-input').value.trim();
+      if (!nick) return alert("Введите никнейм");
+
+      const tgUser = tg?.initDataUnsafe?.user;
+      const tgId = tgUser ? tgUser.id : Math.floor(Math.random() * 1000000);
+
+      let { data, error } = await supabase.from('game_sessions').select('*').eq('telegram_id', tgId).single();
+
+      if (!data) {
+        const { data: newUser, error: createError } = await supabase.from('game_sessions').insert([{
+          telegram_id: tgId, nickname: nick, balance: 1500, position: 0
+        }]).select().single();
+        data = newUser;
+      }
+
+      player = data;
+      document.getElementById('auth-screen').style.display = 'none';
+      updateUI();
+      loadAssets();
+    }
+
+    async function loadAssets() {
+      if (!player) return;
+      const { data } = await supabase.from('player_assets').select('*').eq('player_id', player.id);
+      assets = data || [];
+    }
+
+    function updateUI() {
+      document.getElementById('player-name').innerText = player.nickname;
+      document.getElementById('player-balance').innerText = player.balance + '€';
+    }
+
+    // --- ROLL & ROTATE LOGIC ---
+    async function rollDice() {
+      const btn = document.getElementById('dice-btn');
+      btn.disabled = true;
+
+      const roll = Math.floor(Math.random() * 6) + 1;
+      const newPos = (player.position + roll) % totalSectors;
+
+      // Check passing START (+200€)
+      if (newPos < player.position) {
+        player.balance += 200;
+        alert("Вы прошли круг! +200€");
+      }
+      player.position = newPos;
+
+      // Calculate Rotation Angle
+      const sectorDegrees = 360 / totalSectors;
+      const targetDegree = 360 - (newPos * sectorDegrees);
+      currentRotation += 1080 + (targetDegree - (currentRotation % 360));
+      
+      document.getElementById('wheel').style.transform = `rotate(${currentRotation}deg)`;
+
+      await supabase.from('game_sessions').update({ balance: player.balance, position: newPos }).eq('id', player.id);
+
+      setTimeout(() => {
+        btn.disabled = false;
+        updateUI();
+        handleSectorEvent(SECTORS[newPos]);
+      }, 4000);
+    }
+
+    // --- EVENTS HANDLER ---
+    function handleSectorEvent(sector) {
+      const modal = document.getElementById('event-modal');
+      const title = document.getElementById('modal-title');
+      const desc = document.getElementById('modal-desc');
+      const btns = document.getElementById('modal-buttons');
+
+      title.innerText = sector.name;
+      btns.innerHTML = '';
+
+      if (sector.type === 'city' || sector.type === 'station') {
+        const owned = assets.find(a => a.sector_index === player.position);
+        if (!owned) {
+          desc.innerText = `Свободный объект. Цена: ${sector.price}€. Базовая аренда: ${sector.rent[0] || sector.rent}€`;
+          btns.innerHTML = `
+            <button class="btn" onclick="buyProperty()">Купить (${sector.price}€)</button>
+            <button class="btn" onclick="closeModal()">Отказаться</button>
+          `;
+        } else {
+          desc.innerText = `Владелец актива: вы. Уровень дома: ${owned.houses}`;
+          btns.innerHTML = `<button class="btn" onclick="closeModal()">Закрыть</button>`;
+        }
+      } else if (sector.type === 'tax') {
+        desc.innerText = `Оплата налога: -${sector.val}€`;
+        btns.innerHTML = `<button class="btn" onclick="payTax(${sector.val})">Оплатить</button>`;
+      } else {
+        desc.innerText = `Вы встали на сектор ${sector.name}.`;
+        btns.innerHTML = `<button class="btn" onclick="closeModal()">Принять</button>`;
+      }
+
+      modal.classList.add('active');
+    }
+
+    async function buyProperty() {
+      const sector = SECTORS[player.position];
+      if (player.balance < sector.price) return alert("Недостаточно средств!");
+
+      player.balance -= sector.price;
+      await supabase.from('game_sessions').update({ balance: player.balance }).eq('id', player.id);
+      await supabase.from('player_assets').insert([{ player_id: player.id, sector_index: player.position }]);
+
+      await loadAssets();
+      updateUI();
+      closeModal();
+    }
+
+    async function payTax(amount) {
+      player.balance -= amount;
+      await supabase.from('game_sessions').update({ balance: player.balance }).eq('id', player.id);
+      updateUI();
+      closeModal();
+    }
+
+    function closeModal() {
+      document.getElementById('event-modal').classList.remove('active');
+    }
+
+    // --- FULL MODAL NAV ACTIONS ---
+    function openFullModal(title, contentHtml) {
+      document.getElementById('full-modal-title').innerText = title;
+      document.getElementById('full-modal-body').innerHTML = contentHtml;
+      document.getElementById('full-modal').classList.add('active');
+    }
+    function closeFullModal() {
+      document.getElementById('full-modal').classList.remove('active');
+    }
+
+    function openAssets() {
+      let html = assets.length === 0 ? '<p>У вас пока нет купленной недвижимости.</p>' : '';
+      assets.forEach(a => {
+        const sec = SECTORS[a.sector_index];
+        html += `
+          <div class="asset-item card-border">
+            <div>
+              <b>${sec.name}</b><br><small>Домов: ${a.houses}</small>
+            </div>
+            <button class="btn" onclick="upgradeHouse('${a.id}')">+ Дом (${sec.housePrice || 50}€)</button>
+          </div>
+        `;
+      });
+      openFullModal('🏢 Ваши Активы', html);
+    }
+
+    function openBank() {
+      const html = `
+        <div class="card-border" style="padding:15px; margin-bottom:15px;">
+          <h3>Экспресс Кредит</h3>
+          <p style="font-size:12px; color:#AAA; margin:8px 0;">Возьмите 1000€ прямо сейчас. Через 3 круга с вас автоматически спишется 1200€.</p>
+          <button class="btn" onclick="takeLoan()">Взять кредит 1000€</button>
+        </div>
+      `;
+      openFullModal('🏦 Банк', html);
+    }
+
+    async function takeLoan() {
+      if (player.loan_amount > 0) return alert("У вас уже есть активный кредит!");
+      player.balance += 1000;
+      player.loan_amount = 1200;
+      player.loan_rounds_left = 3;
+      await supabase.from('game_sessions').update({ balance: player.balance, loan_amount: 1200, loan_rounds_left: 3 }).eq('id', player.id);
+      updateUI();
+      closeFullModal();
+      alert("Вам выдан кредит 1000€!");
+    }
+
+    function openMore() {
+      const html = `
+        <button class="btn" style="width:100%; margin-bottom:10px;" onclick="showRules()">📋 Правила игры</button>
+        <button class="btn" style="width:100%; margin-bottom:10px;" onclick="resetGame()">🔄 Новая игра</button>
+      `;
+      openFullModal('⚙️ Ещё', html);
+    }
+
+    function showRules() {
+      alert("1. Старт: +200€ за круг.\n2. Покупайте города и застраивайте их.\n3. Кредит в банке: 1000€ под 20% на 3 круга.");
+    }
+
+    function resetGame() {
+      if (confirm("Вы уверены, что хотите сбросить игру?")) {
+        location.reload();
+      }
+    }
+  </script>
+</body>
+  </html>
+  
